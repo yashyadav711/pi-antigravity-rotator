@@ -357,9 +357,26 @@ async function handleUpstreamAccountAction(
       429,
       `cooldownMs=${action.cooldownMs}${action.providerResourceExhausted ? " resourceExhausted=true" : ""} endpoint=${action.endpoint}`,
     );
+    // QUOTA-EXHAUSTED (RESOURCE_EXHAUSTED) = this account's daily quota is
+    // used up. Each Google account has an INDEPENDENT daily quota, so rotating
+    // to the next available account is the correct, seamless move — it is NOT
+    // pool-hammering: recordProvider429's model circuit breaker already catches
+    // true pool-wide exhaustion (trips after N unique accounts 429 in-window).
+    // Only a plain rate-limit (shared request-rate throttle) stays a
+    // non-rotating failure, since cascading there genuinely hammers the shared
+    // bucket and raises ban/flag risk.
+    if (action.providerResourceExhausted) {
+      const nextAccount = await rotateAndRelease();
+      if (!nextAccount) {
+        return buildNoReplacementDecision(
+          options,
+          `no replacement account remained after ${label} hit provider RESOURCE_EXHAUSTED`,
+        );
+      }
+      return { kind: "retry" };
+    }
     return buildFailureDecision(options, 429, action.errorText, {
       retryAfterMs: action.cooldownMs,
-      providerResourceExhausted: action.providerResourceExhausted,
     });
   }
 

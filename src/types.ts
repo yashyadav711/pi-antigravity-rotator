@@ -293,6 +293,8 @@ export interface AccountRuntime {
   lastUsed: number;
   lastError: string | null;
   consecutiveErrors: number;
+  disabledAt: number; // ms ts of the last error-disable; 0 = not error-disabled (operator-disabled/flagged never auto-recover)
+  disableCount: number; // consecutive auto-disable cycles → drives exponential re-enable backoff
   disabled: boolean; // permanently disabled (revoked token, etc.)
   flagged: boolean; // flagged for infringement/abuse by Google
   inFlightRequests: number;
@@ -350,6 +352,8 @@ export interface PersistedState {
       quotaExhaustedAt: number;
       disabled: boolean;
       flagged: boolean;
+      disabledAt?: number;
+      disableCount?: number;
       allowFreshWindowStartsOverride?: boolean;
     }
   >;

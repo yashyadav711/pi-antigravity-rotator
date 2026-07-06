@@ -162,6 +162,8 @@ export class AccountRotator {
       consecutiveErrors: 0,
       disabled: false,
       flagged: false,
+      disabledAt: 0,
+      disableCount: 0,
       inFlightRequests: 0,
       inFlightByModel: {},
       allowFreshWindowStartsOverride: false,
@@ -314,6 +316,8 @@ export class AccountRotator {
           account.quotaExhaustedAt = saved.quotaExhaustedAt;
           account.disabled = saved.disabled;
           account.flagged = saved.flagged ?? false;
+          account.disabledAt = saved.disabledAt ?? 0;
+          account.disableCount = saved.disableCount ?? 0;
           account.allowFreshWindowStartsOverride =
             saved.allowFreshWindowStartsOverride ?? false;
         }
@@ -414,6 +418,8 @@ export class AccountRotator {
         quotaExhaustedAt: account.quotaExhaustedAt,
         disabled: account.disabled,
         flagged: account.flagged,
+        disabledAt: account.disabledAt,
+        disableCount: account.disableCount,
         allowFreshWindowStartsOverride: account.allowFreshWindowStartsOverride,
       };
     }
@@ -500,6 +506,32 @@ export class AccountRotator {
   private async pollAllQuotas(): Promise<void> {
     // Reset per-cycle warmup tracking so each poll cycle allows at most one warmup per upstream model per account.
     this.warmupSentThisCycle.clear();
+    // AUTO-RECOVERY (account-safety hardening): an account error-disabled
+    // after 5 consecutive operational errors self-heals — but on an
+    // EXPONENTIAL backoff (15m → 30m → 1h → 2h → 4h cap), so a transient
+    // burst can't permanently kill the pool while a persistently-failing
+    // account is retried ever more rarely and NEVER hammered (which is what
+    // provokes a Google flag/ban). `flagged` accounts (provider enforcement)
+    // are NEVER auto-recovered, and operator-disabled accounts (disabledAt===0)
+    // stay disabled until an operator restores them.
+    const AUTO_REENABLE_BASE_MS = 15 * 60 * 1000;
+    const AUTO_REENABLE_MAX_MS = 4 * 60 * 60 * 1000;
+    const autoNow = Date.now();
+    let autoHealed = false;
+    for (const a of this.accounts) {
+      if (a.disabled && !a.flagged && a.disabledAt > 0) {
+        const backoff = Math.min(AUTO_REENABLE_BASE_MS * 2 ** Math.max(0, a.disableCount - 1), AUTO_REENABLE_MAX_MS);
+        if (autoNow - a.disabledAt >= backoff) {
+          a.disabled = false;
+          a.consecutiveErrors = 0;
+          a.lastError = null;
+          a.disabledAt = 0;
+          autoHealed = true;
+          this.log(`${a.config.email}: AUTO-RE-ENABLED after ${Math.round(backoff / 60000)}m backoff (disableCount=${a.disableCount}); will re-disable if errors persist`, "warn");
+        }
+      }
+    }
+    if (autoHealed) this.saveState();
 
     const available = this.accounts.filter((a) => !a.disabled && !a.flagged);
     for (const account of available) {
@@ -1635,6 +1667,7 @@ export class AccountRotator {
     account.totalRequests++;
     account.lastUsed = Date.now();
     account.consecutiveErrors = 0;
+    account.disableCount = 0;
     account.lastError = null;
 
     const modelKey = model ? resolveQuotaModelKey(model) : null;
@@ -2192,6 +2225,8 @@ export class AccountRotator {
     account.consecutiveErrors++;
     if (account.consecutiveErrors >= 5) {
       account.disabled = true;
+      account.disabledAt = Date.now();
+      account.disableCount++;
       this.log(
         `${account.config.email}: DISABLED after ${account.consecutiveErrors} consecutive errors`,
         "error",
@@ -2213,6 +2248,8 @@ export class AccountRotator {
     account.disabled = false;
     account.flagged = false;
     account.consecutiveErrors = 0;
+    account.disabledAt = 0;
+    account.disableCount = 0;
     account.lastError = null;
     account.cooldownsByModel = {};
     this.saveState();
@@ -2224,6 +2261,7 @@ export class AccountRotator {
     const account = this.accounts.find((a) => a.config.email === email);
     if (!account) return false;
     account.disabled = true;
+    account.disabledAt = 0;
     account.lastError = "Disabled by operator";
     this.saveState();
     this.log(`${email}: disabled by operator`, "warn");
@@ -2249,6 +2287,8 @@ export class AccountRotator {
     account.disabled = false;
     account.flagged = false;
     account.consecutiveErrors = 0;
+    account.disabledAt = 0;
+    account.disableCount = 0;
     account.lastError = null;
     this.saveState();
     this.log(`${email}: restored by operator`, "warn");
@@ -2735,6 +2775,8 @@ export class AccountRotator {
         consecutiveErrors: 0,
         disabled: false,
         flagged: false,
+        disabledAt: 0,
+        disableCount: 0,
         inFlightRequests: 0,
         inFlightByModel: {},
         allowFreshWindowStartsOverride: false,
@@ -2840,6 +2882,8 @@ export class AccountRotator {
         consecutiveErrors: 0,
         disabled: false,
         flagged: false,
+        disabledAt: 0,
+        disableCount: 0,
         inFlightRequests: 0,
         inFlightByModel: {},
         allowFreshWindowStartsOverride: false,

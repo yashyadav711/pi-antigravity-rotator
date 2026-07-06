@@ -251,17 +251,93 @@ describe("proxy e2e: 429 rate-limited", () => {
 		}
 	});
 
-	it("uses RESOURCE_EXHAUSTED cooldown (30min) for quota-exhausted responses", async () => {
+	it("rotates to a fresh account on RESOURCE_EXHAUSTED and succeeds (independent per-account quota)", async () => {
+		let upstreamHits = 0;
 		const upstream = await listen((req, res) => {
-			res.writeHead(429, {
-				"Content-Type": "application/json",
-			});
+			upstreamHits++;
+			if (upstreamHits === 1) {
+				res.writeHead(429, { "Content-Type": "application/json" });
+				res.end(JSON.stringify({ error: { status: "RESOURCE_EXHAUSTED", message: "quota exceeded" } }));
+			} else {
+				res.writeHead(200, { "Content-Type": "application/json" });
+				res.end(JSON.stringify({ ok: true }));
+			}
+		});
+		endpointOverrides.splice(0, endpointOverrides.length, upstream.url);
+
+		const exhausted = makeAccount("quota@example.com");
+		const fresh = makeAccount("fresh@example.com");
+		let active: AccountRuntime = exhausted;
+		const tracking = { markExhausted: 0, recordProvider429: 0, finishRequest: 0, lastCooldownMs: 0 };
+		const rotator = {
+			getActiveAccount: async () => active,
+			rotateToNext: async () => { active = fresh; return fresh; },
+			finishRequest: () => { tracking.finishRequest++; },
+			getRetryAfterMs: () => 0,
+			getSafetyJitterMs: () => 0,
+			recordUpstreamAttempt: () => {},
+			markExhausted: (_a: unknown, _m: unknown, cooldownMs: number) => { tracking.markExhausted++; tracking.lastCooldownMs = cooldownMs; },
+			recordProvider429: () => { tracking.recordProvider429++; },
+			getFlagContext: () => ({
+				timerType: "fresh", accountQuotaPercent: 0, wasProAccount: false,
+				accountRequestsLastHour: 0, poolSize: 2, poolHealthyCount: 1, uptimeSeconds: 0,
+			}),
+			markFlagged: () => {},
+			markError: () => {},
+			recordRequest: () => false,
+			recordProxyEvent: () => {},
+			getGlobalDelayMs: () => 0,
+		} as unknown as AccountRotator;
+
+		try {
+			const outcome = await withRotation(
+				rotator,
+				"gemini-3.1-pro",
+				{},
+				makeBody(),
+				async (_response, context) => `served-by-${context.label}`,
+			);
+
+			assert.equal(outcome.ok, true, "expected rotation to a fresh account to succeed");
+			if (outcome.ok) {
+				assert.equal(outcome.result, "served-by-fresh@example.com");
+			}
+			assert.equal(tracking.markExhausted, 1, "exhausted account cooled down exactly once");
+			assert.equal(tracking.lastCooldownMs, 1_800_000, "RESOURCE_EXHAUSTED gets a fixed 30min cooldown");
+			assert.equal(tracking.recordProvider429, 1);
+			assert.equal(upstreamHits, 2, "first account 429 (quota), second account 200");
+		} finally {
+			await upstream.close();
+		}
+	});
+
+	it("returns no-accounts-available when quota-exhausted and no replacement account remains", async () => {
+		const upstream = await listen((req, res) => {
+			res.writeHead(429, { "Content-Type": "application/json" });
 			res.end(JSON.stringify({ error: { status: "RESOURCE_EXHAUSTED", message: "quota exceeded" } }));
 		});
 		endpointOverrides.splice(0, endpointOverrides.length, upstream.url);
 
-		const tracking = { markExhausted: 0, recordProvider429: 0, finishRequest: 0 };
-		const rotator = makeRotator(makeAccount("quota@example.com"), tracking);
+		const tracking = { markExhausted: 0, recordProvider429: 0, finishRequest: 0, lastCooldownMs: 0 };
+		const rotator = {
+			getActiveAccount: async () => makeAccount("quota@example.com"),
+			rotateToNext: async () => null,
+			finishRequest: () => { tracking.finishRequest++; },
+			getRetryAfterMs: () => 0,
+			getSafetyJitterMs: () => 0,
+			recordUpstreamAttempt: () => {},
+			markExhausted: (_a: unknown, _m: unknown, cooldownMs: number) => { tracking.markExhausted++; tracking.lastCooldownMs = cooldownMs; },
+			recordProvider429: () => { tracking.recordProvider429++; },
+			getFlagContext: () => ({
+				timerType: "fresh", accountQuotaPercent: 0, wasProAccount: false,
+				accountRequestsLastHour: 0, poolSize: 1, poolHealthyCount: 0, uptimeSeconds: 0,
+			}),
+			markFlagged: () => {},
+			markError: () => {},
+			recordRequest: () => false,
+			recordProxyEvent: () => {},
+			getGlobalDelayMs: () => 0,
+		} as unknown as AccountRotator;
 
 		try {
 			const outcome = await withRotation(
@@ -274,11 +350,10 @@ describe("proxy e2e: 429 rate-limited", () => {
 
 			assert.equal(outcome.ok, false);
 			if (!outcome.ok) {
-				assert.equal(outcome.status, 429);
-				// RESOURCE_EXHAUSTED gets a fixed 30min cooldown regardless of Retry-After
-				assert.equal(outcome.retryAfterMs, 1_800_000);
+				assert.ok([429, 503].includes(outcome.status), `expected 429 or 503, got ${outcome.status}`);
 			}
-			assert.equal(tracking.finishRequest, 1, "RESOURCE_EXHAUSTED should release the account once");
+			assert.equal(tracking.markExhausted, 1, "exhausted account cooled down once");
+			assert.equal(tracking.lastCooldownMs, 1_800_000, "RESOURCE_EXHAUSTED gets a fixed 30min cooldown");
 		} finally {
 			await upstream.close();
 		}
