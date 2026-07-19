@@ -21,11 +21,15 @@ export function sanitizeGeminiSchema(schema: unknown): unknown {
 		"multipleOf", "minLength", "maxLength", "pattern",
 		"minItems", "maxItems", "uniqueItems",
 		"minProperties", "maxProperties", "title", "default",
+		"deprecated",
 	]);
 
 	const out: Record<string, unknown> = {};
 	for (const [key, value] of Object.entries(schema)) {
 		if (UNSUPPORTED.has(key)) continue;
+		// Vendor extension keys (e.g. x-google-enum-descriptions) are rejected
+		// by Gemini's protobuf layer with a 400.
+		if (key.startsWith("x-")) continue;
 
 		if (key === "anyOf" || key === "oneOf" || key === "allOf") {
 			if (Array.isArray(value)) {
@@ -105,11 +109,15 @@ export function sanitizeClaudeViaGeminiSchema(schema: unknown): unknown {
 		"contentEncoding", "contentMediaType",
 		// Gemini's protobuf layer rejects these regardless of target model
 		"exclusiveMinimum", "exclusiveMaximum",
+		"deprecated",
 	]);
 
 	const out: Record<string, unknown> = {};
 	for (const [key, value] of Object.entries(schema)) {
 		if (UNSUPPORTED.has(key)) continue;
+		// Vendor extension keys (e.g. x-google-enum-descriptions) are rejected
+		// by Gemini's protobuf layer with a 400.
+		if (key.startsWith("x-")) continue;
 
 		// `const` is not supported by Gemini's API — convert to a single-value enum
 		if (key === "const") {

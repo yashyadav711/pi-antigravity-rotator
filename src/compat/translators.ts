@@ -325,6 +325,7 @@ export function validateMessages(value: unknown): value is ChatMessage[] {
       return (
         typeof msg.content === "string" ||
         msg.content === null ||
+        msg.content === undefined ||
         Array.isArray(msg.content)
       );
     })
