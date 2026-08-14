@@ -782,8 +782,24 @@ export function openAIToAntigravityBody(
     return true;
   });
 
-  const isClaude = /^claude-/i.test(input.model);
-  const isThinking = isThinkingModel(input.model);
+  // A `-search` suffix means "same model, but let Google search for it".
+  //
+  // Grounding is only reachable through the NATIVE route, where `tools` is passed
+  // to the upstream untouched. Over /v1/chat/completions the tool list is
+  // translated into function declarations and anything that is not a named
+  // function is dropped, so a client like Open WebUI has no way to ask for it -
+  // the model then truthfully answers that it has no internet.
+  //
+  // Encoding the request in the model NAME is what makes it usable: any
+  // OpenAI-compatible client can opt in by picking the model from its dropdown,
+  // with no extra parameter, header, or per-message toggle.
+  const wantsSearch = /-search$/i.test(input.model);
+  const baseModel = wantsSearch
+    ? input.model.replace(/-search$/i, "")
+    : input.model;
+
+  const isClaude = /^claude-/i.test(baseModel);
+  const isThinking = isThinkingModel(baseModel);
   const isGeminiThinking = !isClaude && isThinking;
 
   const contents: GeminiContent[] = [];
@@ -1043,14 +1059,25 @@ export function openAIToAntigravityBody(
   const inputTools = Array.isArray(input.tools)
     ? (input.tools as OpenAITool[])
     : [];
-  const geminiTools = convertOpenAIToolsToGemini(inputTools, isClaude);
+  // Gemini's grounding tool sits alongside function declarations rather than
+  // inside them, so it needs its own union member instead of widening the type.
+  type GeminiToolEntry =
+    | { functionDeclarations: GeminiFunctionDeclaration[] }
+    | { googleSearch: Record<string, never> };
+  const geminiTools: GeminiToolEntry[] = convertOpenAIToolsToGemini(
+    inputTools,
+    isClaude,
+  );
+  // Claude served through Google does not take googleSearch, so only offer it to
+  // the Gemini family — silently sending it would turn a working model into a 400.
+  if (wantsSearch && !isClaude) geminiTools.push({ googleSearch: {} });
   const geminiToolConfig =
     input.tool_choice !== undefined
       ? convertToolChoiceToGemini(input.tool_choice)
       : undefined;
 
-  const modelSpec = getModelSpec(input.model);
-  const modelFamily = getModelFamily(input.model);
+  const modelSpec = getModelSpec(baseModel);
+  const modelFamily = getModelFamily(baseModel);
   let maxOutputTokens =
     typeof input.max_tokens === "number" ? input.max_tokens : undefined;
   if (maxOutputTokens && maxOutputTokens > modelSpec.maxOutputTokens) {
@@ -1134,7 +1161,10 @@ export function openAIToAntigravityBody(
   if (geminiTools.length > 0) request.tools = geminiTools;
   if (geminiToolConfig) request.toolConfig = geminiToolConfig;
 
-  const mappedModel = applyModelAlias(input.model);
+  // Upstream must receive the REAL model id; `-search` is our own convention and
+  // Google would reject it. displayModel keeps the name the client chose, so
+  // logs, quota accounting, and the dashboard still show what was asked for.
+  const mappedModel = applyModelAlias(baseModel);
 
   return {
     project: "compat-placeholder",

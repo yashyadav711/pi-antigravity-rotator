@@ -1157,10 +1157,35 @@ const MODEL_CATALOG = [
   },
 ] as const;
 
+interface CatalogEntry {
+  id: string;
+  family: string;
+  ctx: number;
+  quotaPool: string;
+  multimodal: boolean;
+  tools: boolean;
+}
+
+// Every Gemini model gets a `-search` twin: same model, same quota pool, but the
+// request carries Google's grounding tool so the model can actually look things
+// up. Derived rather than hand-listed so the two lists cannot drift apart as
+// models come and go.
+//
+// Claude and gpt-oss are excluded on purpose - served through Google they reject
+// googleSearch, and advertising a model that 400s is worse than not offering it.
+const SEARCH_CATALOG: CatalogEntry[] = MODEL_CATALOG.filter((m) =>
+  m.family.startsWith("gemini"),
+).map((m) => ({ ...m, id: `${m.id}-search` }));
+
+const FULL_CATALOG: readonly CatalogEntry[] = [
+  ...MODEL_CATALOG,
+  ...SEARCH_CATALOG,
+];
+
 export function serveOpenAIModels(res: ServerResponse): void {
   writeJson(res, 200, {
     object: "list",
-    data: MODEL_CATALOG.map(
+    data: FULL_CATALOG.map(
       ({ id, ctx, family, quotaPool, multimodal, tools }) => ({
         id,
         object: "model",
@@ -1182,7 +1207,7 @@ export function serveOpenAIModels(res: ServerResponse): void {
 
 export function serveGeminiModels(res: ServerResponse): void {
   writeJson(res, 200, {
-    models: MODEL_CATALOG.map(
+    models: FULL_CATALOG.map(
       ({ id, ctx, family, quotaPool, multimodal, tools }) => ({
         name: `models/${id}`,
         baseModelId: family,
