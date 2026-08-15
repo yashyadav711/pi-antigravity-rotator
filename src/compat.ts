@@ -1166,21 +1166,28 @@ interface CatalogEntry {
   tools: boolean;
 }
 
-// Every Gemini model gets a `-search` twin: same model, same quota pool, but the
-// request carries Google's grounding tool so the model can actually look things
-// up. Derived rather than hand-listed so the two lists cannot drift apart as
-// models come and go.
+// Every Gemini model HAS a `-search` twin: same model, same quota pool, but the
+// request carries Google's grounding tool so the model can actually look things up.
+// The suffix is honoured unconditionally by the translator — asking for
+// `gemini-3.1-pro-high-search` always works.
 //
-// Claude and gpt-oss are excluded on purpose - served through Google they reject
-// googleSearch, and advertising a model that 400s is worse than not offering it.
+// They are NOT ADVERTISED by default. A client that already arms its own web search
+// for every model (Open WebUI does, once web_search is a default feature) gains
+// nothing from five extra dropdown entries except a longer list and a second way to
+// do the same job. Set PI_ROTATOR_ADVERTISE_SEARCH_MODELS=1 to list them.
+//
+// Claude and gpt-oss are excluded either way: served through Google they reject
+// googleSearch, and offering a model that 400s is worse than not offering it.
 const SEARCH_CATALOG: CatalogEntry[] = MODEL_CATALOG.filter((m) =>
   m.family.startsWith("gemini"),
 ).map((m) => ({ ...m, id: `${m.id}-search` }));
 
-const FULL_CATALOG: readonly CatalogEntry[] = [
-  ...MODEL_CATALOG,
-  ...SEARCH_CATALOG,
-];
+const ADVERTISE_SEARCH_TWINS =
+  process.env.PI_ROTATOR_ADVERTISE_SEARCH_MODELS === "1";
+
+const FULL_CATALOG: readonly CatalogEntry[] = ADVERTISE_SEARCH_TWINS
+  ? [...MODEL_CATALOG, ...SEARCH_CATALOG]
+  : MODEL_CATALOG;
 
 export function serveOpenAIModels(res: ServerResponse): void {
   writeJson(res, 200, {
