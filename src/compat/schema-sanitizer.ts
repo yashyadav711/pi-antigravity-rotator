@@ -11,22 +11,41 @@ export function isRecord(value: unknown): value is Record<string, unknown> {
 export function sanitizeGeminiSchema(schema: unknown): unknown {
 	if (!isRecord(schema)) return schema;
 
-	// Keywords Gemini does not support
-	const UNSUPPORTED = new Set([
-		"const", "$schema", "$id", "$ref", "$defs", "definitions",
-		"if", "then", "else", "not",
-		"patternProperties", "unevaluatedProperties", "unevaluatedItems",
-		"contentEncoding", "contentMediaType", "examples",
-		"exclusiveMinimum", "exclusiveMaximum", "minimum", "maximum",
-		"multipleOf", "minLength", "maxLength", "pattern",
-		"minItems", "maxItems", "uniqueItems",
-		"minProperties", "maxProperties", "title", "default",
-		"deprecated",
-	]);
+	// Keywords Gemini does not support.
+	//
+	// `propertyNames` was the one that mattered on 2026-08-16: Open WebUI's builtin
+	// tools include a dict-keyed parameter, Pydantic emits `propertyNames` for it, and
+	// Gemini answered every request carrying that tool with
+	//   400 Unknown name "propertyNames" ... Cannot find field
+	// which fails the WHOLE call, not just that tool. Every Gemini model in the pool
+	// was unusable in Open WebUI with tools attached, and it read as "web search is
+	// broken" because that is the feature the user reached for.
+	//
+	// The structural Draft 2020-12 keywords below are in the same class - fields
+	// Gemini's protobuf has never heard of - so they are stripped for the same reason
+	// rather than waiting for each one to surface as its own outage.
+	const UNSUPPORTED: Record<string, true> = {
+		const: true, $schema: true, $id: true, $ref: true, $defs: true,
+		definitions: true, $comment: true,
+		if: true, then: true, else: true, not: true,
+		patternProperties: true, propertyNames: true,
+		unevaluatedProperties: true, unevaluatedItems: true,
+		dependentSchemas: true, dependentRequired: true,
+		prefixItems: true, contains: true, minContains: true, maxContains: true,
+		additionalItems: true,
+		contentEncoding: true, contentMediaType: true, examples: true,
+		exclusiveMinimum: true, exclusiveMaximum: true, minimum: true, maximum: true,
+		multipleOf: true, minLength: true, maxLength: true, pattern: true,
+		minItems: true, maxItems: true, uniqueItems: true,
+		minProperties: true, maxProperties: true, title: true, default: true,
+		deprecated: true, readOnly: true, writeOnly: true,
+	};
 
 	const out: Record<string, unknown> = {};
 	for (const [key, value] of Object.entries(schema)) {
-		if (UNSUPPORTED.has(key)) continue;
+		// hasOwn, not `in`: a schema property literally named "constructor" would
+		// otherwise resolve up the prototype chain and be stripped as unsupported.
+		if (Object.hasOwn(UNSUPPORTED, key)) continue;
 		// Vendor extension keys (e.g. x-google-enum-descriptions) are rejected
 		// by Gemini's protobuf layer with a 400.
 		if (key.startsWith("x-")) continue;
@@ -102,19 +121,29 @@ export function sanitizeClaudeViaGeminiSchema(schema: unknown): unknown {
 	// Only remove fields that Gemini's API layer truly rejects at the network level.
 	// We keep standard Draft 2020-12 keywords but must strip exclusiveMinimum/exclusiveMaximum
 	// as boolean values (Draft 4) — the API layer rejects them even for Claude-bound requests.
-	const UNSUPPORTED = new Set([
-		"$schema", "$id", "$ref", "$defs", "definitions",
-		"if", "then", "else", "not",
-		"patternProperties", "unevaluatedProperties", "unevaluatedItems",
-		"contentEncoding", "contentMediaType",
+	// Claude keeps the standard validation keywords it actually honours; only fields
+	// Gemini's own protobuf layer rejects on the way through are removed. That layer
+	// validates before routing, so a structural keyword it does not know - the
+	// `propertyNames` that broke every Gemini model on 2026-08-16 - 400s a
+	// Claude-bound request just the same.
+	const UNSUPPORTED: Record<string, true> = {
+		$schema: true, $id: true, $ref: true, $defs: true, definitions: true,
+		$comment: true,
+		if: true, then: true, else: true, not: true,
+		patternProperties: true, propertyNames: true,
+		unevaluatedProperties: true, unevaluatedItems: true,
+		dependentSchemas: true, dependentRequired: true,
+		prefixItems: true, contains: true, minContains: true, maxContains: true,
+		additionalItems: true,
+		contentEncoding: true, contentMediaType: true,
 		// Gemini's protobuf layer rejects these regardless of target model
-		"exclusiveMinimum", "exclusiveMaximum",
-		"deprecated",
-	]);
+		exclusiveMinimum: true, exclusiveMaximum: true,
+		deprecated: true,
+	};
 
 	const out: Record<string, unknown> = {};
 	for (const [key, value] of Object.entries(schema)) {
-		if (UNSUPPORTED.has(key)) continue;
+		if (Object.hasOwn(UNSUPPORTED, key)) continue;
 		// Vendor extension keys (e.g. x-google-enum-descriptions) are rejected
 		// by Gemini's protobuf layer with a 400.
 		if (key.startsWith("x-")) continue;
