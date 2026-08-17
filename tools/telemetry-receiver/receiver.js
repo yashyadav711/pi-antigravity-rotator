@@ -271,8 +271,12 @@ const MODEL_PRICING = {
 	"gemini-3-flash":           { inputPer1M: 0.50,  outputPer1M: 3.00 },
 	"gemini-3.5-flash":         { inputPer1M: 1.50,  outputPer1M: 9.00 },
 	"gemini-3.5-flash-low":     { inputPer1M: 1.50,  outputPer1M: 9.00 },
+	"gemini-3.5-flash-extra-low":{ inputPer1M: 1.50, outputPer1M: 9.00 },
 	"gemini-3.5-flash-medium":  { inputPer1M: 1.50,  outputPer1M: 9.00 },
 	"gemini-3.5-flash-high":    { inputPer1M: 1.50,  outputPer1M: 9.00 },
+	"gemini-3.6-flash-high":    { inputPer1M: 1.50,  outputPer1M: 9.00 },
+	"gemini-3.6-flash-medium":  { inputPer1M: 1.50,  outputPer1M: 9.00 },
+	"gemini-3.6-flash-low":     { inputPer1M: 1.50,  outputPer1M: 9.00 },
 	"gpt-oss-120b-medium":      { inputPer1M: 2.00,  outputPer1M: 10.00 },
 };
 

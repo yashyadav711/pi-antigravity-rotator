@@ -1091,6 +1091,32 @@ async function completeViaRotator(
 }
 
 const MODEL_CATALOG = [
+  // ── Gemini 3.6 Flash (newest, default) ──
+  {
+    id: "gemini-3.6-flash-high",
+    family: "gemini-3.6-flash",
+    ctx: 1048576,
+    quotaPool: "gemini-3.5-flash",
+    multimodal: true,
+    tools: true,
+  },
+  {
+    id: "gemini-3.6-flash-medium",
+    family: "gemini-3.6-flash",
+    ctx: 1048576,
+    quotaPool: "gemini-3.5-flash",
+    multimodal: true,
+    tools: true,
+  },
+  {
+    id: "gemini-3.6-flash-low",
+    family: "gemini-3.6-flash",
+    ctx: 1048576,
+    quotaPool: "gemini-3.5-flash",
+    multimodal: true,
+    tools: true,
+  },
+  // ── Gemini 3.5 Flash ──
   {
     id: "gemini-3.5-flash-medium",
     family: "gemini-3.5-flash",
@@ -1108,6 +1134,14 @@ const MODEL_CATALOG = [
     tools: true,
   },
   {
+    id: "gemini-3.5-flash-low",
+    family: "gemini-3.5-flash",
+    ctx: 1048576,
+    quotaPool: "gemini-3.5-flash",
+    multimodal: true,
+    tools: true,
+  },
+  {
     id: "gemini-3-flash",
     family: "gemini-3.5-flash",
     ctx: 1048576,
@@ -1115,6 +1149,7 @@ const MODEL_CATALOG = [
     multimodal: true,
     tools: true,
   },
+  // ── Gemini 3.1 Pro ──
   {
     id: "gemini-3.1-pro-low",
     family: "gemini-3.1-pro",
@@ -1131,6 +1166,7 @@ const MODEL_CATALOG = [
     multimodal: true,
     tools: true,
   },
+  // ── Claude ──
   {
     id: "claude-sonnet-4-6",
     family: "claude",
@@ -1147,6 +1183,7 @@ const MODEL_CATALOG = [
     multimodal: true,
     tools: true,
   },
+  // ── GPT-OSS ──
   {
     id: "gpt-oss-120b-medium",
     family: "gpt-oss",
